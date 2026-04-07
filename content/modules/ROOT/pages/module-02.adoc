@@ -14,7 +14,7 @@ So let's get practical in our example of an EMEA environment and a US environmen
 
 [source,sh,subs="attributes",role=execute]
 ----
-cd ~/rh1-svc-lab
+cd ~/svc-lab
 ./lab-setup/02-compliance-operator-install.sh
 ----
 
