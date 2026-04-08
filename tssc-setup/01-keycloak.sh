@@ -8,6 +8,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# RH-SSO / Keycloak install targets the hub (same as lab); parallel setup may leave another context selected.
+KUBE_CONTEXT="${KUBE_CONTEXT:-local-cluster}"
+oc config use-context "$KUBE_CONTEXT" &>/dev/null || true
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,29 +60,12 @@ log "✓ Cluster admin privileges confirmed"
 log "Prerequisites validated successfully"
 log ""
 
+# Check if RHSSO Operator is already installed
+log "Checking if RHSSO Operator is already installed..."
 NAMESPACE="rhsso"
-SKIP_TO_SUMMARY=false
-ROUTE_KEYCLOAK_HOST=""
 OPERATOR_INSTALLED=false
 
-# Workshop / pre-provisioned clusters: Keycloak already exposed and running — verify only, no Subscription/CR churn
-if oc get namespace "$NAMESPACE" >/dev/null 2>&1; then
-    ROUTE_KEYCLOAK_HOST=$(oc get route keycloak-rhsso -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    if [ -z "$ROUTE_KEYCLOAK_HOST" ]; then
-        ROUTE_KEYCLOAK_HOST=$(oc get route keycloak -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    fi
-    STS_READY=$(oc get statefulset keycloak -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}/{.status.replicas}' 2>/dev/null || echo "")
-    if [ -n "$ROUTE_KEYCLOAK_HOST" ] && [ "$STS_READY" = "1/1" ]; then
-        log "Keycloak is already installed in $NAMESPACE (route https://${ROUTE_KEYCLOAK_HOST} and StatefulSet 1/1)."
-        log "Skipping RHSSO operator install, Subscription, and Keycloak CR deployment — verify-only path."
-        SKIP_TO_SUMMARY=true
-        OPERATOR_INSTALLED=true
-    fi
-fi
-
-# Check if RHSSO Operator is already installed (skipped when verify-only path above matched)
-log "Checking if RHSSO Operator is already installed..."
-if [ "$SKIP_TO_SUMMARY" != true ] && oc get namespace $NAMESPACE >/dev/null 2>&1; then
+if oc get namespace $NAMESPACE >/dev/null 2>&1; then
     log "Namespace $NAMESPACE already exists"
     
     # Check for existing subscription
@@ -103,8 +90,8 @@ if [ "$SKIP_TO_SUMMARY" != true ] && oc get namespace $NAMESPACE >/dev/null 2>&1
     else
         log "Namespace exists but no subscription found, proceeding with installation..."
     fi
-elif [ "$SKIP_TO_SUMMARY" != true ]; then
-    log "RHSSO namespace not found, proceeding with installation..."
+else
+    log "RHSSO Operator not found, proceeding with installation..."
 fi
 
 # Install Red Hat Single Sign-On Operator (if not already installed)
@@ -241,7 +228,7 @@ EOF
     log "Verifying subscription..."
     sleep 3
 
-    SUBSCRIPTION_STATUS=$(oc get subscription rhsso-operator -n $NAMESPACE -o jsonpath='{.status.state}' 2>/dev/null || echo "")
+    SUBSCRIPTION_STATUS=$(oc get subscription.operators.coreos.com rhsso-operator -n $NAMESPACE -o jsonpath='{.status.state}' 2>/dev/null || echo "")
     log "Subscription state: ${SUBSCRIPTION_STATUS:-unknown}"
 
     # Step 5: Wait for CSV to be created and installed
@@ -265,7 +252,7 @@ EOF
         # Show progress every 10 seconds
         if [ $((WAIT_COUNT % 10)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
             log "  Progress check (${WAIT_COUNT}s/${MAX_WAIT}s):"
-            oc get csv,subscription,installplan -n $NAMESPACE 2>/dev/null | head -5 || true
+            oc get csv,subscription.operators.coreos.com,installplan -n $NAMESPACE 2>/dev/null | head -5 || true
             log ""
         fi
         
@@ -275,8 +262,8 @@ EOF
 
     if [ "$CSV_CREATED" = false ]; then
         warning "CSV not created after ${MAX_WAIT} seconds. Current status:"
-        oc get csv,subscription,installplan -n $NAMESPACE
-        warning "CSV may still be installing. Check subscription status: oc get subscription rhsso-operator -n $NAMESPACE"
+        oc get csv,subscription.operators.coreos.com,installplan -n $NAMESPACE
+        warning "CSV may still be installing. Check subscription status: oc get subscription.operators.coreos.com rhsso-operator -n $NAMESPACE"
     fi
 
     # Get the CSV name
@@ -310,7 +297,7 @@ EOF
     oc get csv -n $NAMESPACE 2>/dev/null || log "  No CSV found"
     log ""
     log "Subscription status:"
-    oc get subscription rhsso-operator -n $NAMESPACE 2>/dev/null || log "  No subscription found"
+    oc get subscription.operators.coreos.com rhsso-operator -n $NAMESPACE 2>/dev/null || log "  No subscription found"
     log ""
     log "Pod status:"
     oc get pods -n $NAMESPACE 2>/dev/null || log "  No pods found"
@@ -353,14 +340,14 @@ EOF
     fi
     log "========================================================="
     log ""
-elif [ "$SKIP_TO_SUMMARY" != true ]; then
+else
     # Operator already installed, get CSV name for display
     CSV_NAME=$(oc get csv -n $NAMESPACE -o name 2>/dev/null | grep rhsso-operator | head -1 | sed 's|clusterserviceversion.operators.coreos.com/||' || echo "")
     if [ -z "$CSV_NAME" ]; then
         CSV_NAME=$(oc get csv -n $NAMESPACE -l operators.coreos.com/rhsso-operator.rhsso -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     fi
     if [ -z "$CSV_NAME" ]; then
-        CSV_NAME=$(oc get subscription rhsso-operator -n $NAMESPACE -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
+        CSV_NAME=$(oc get subscription.operators.coreos.com rhsso-operator -n $NAMESPACE -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
     fi
     
     log ""
@@ -378,16 +365,6 @@ elif [ "$SKIP_TO_SUMMARY" != true ]; then
     log ""
 fi
 
-KEYCLOAK_CR_NAME="rhsso-instance"
-
-if [ "$SKIP_TO_SUMMARY" = true ]; then
-    log ""
-    log "========================================================="
-    log "Step 8: Skipped — Keycloak already running"
-    log "========================================================="
-    log ""
-    KEYCLOAK_CRD="keycloak"
-else
 # Step 8: Deploy Keycloak instance
 log ""
 log "========================================================="
@@ -395,30 +372,29 @@ log "Step 8: Deploying Keycloak instance"
 log "========================================================="
 log ""
 
-# Prefer the API that actually owns rhsso-instance (keycloak.org CR vs k8s.keycloak.org)
-KEYCLOAK_CRD=""
-if oc get keycloak "$KEYCLOAK_CR_NAME" -n "$NAMESPACE" &>/dev/null; then
-    KEYCLOAK_CRD="keycloak"
-    log "Using Keycloak API: keycloak (matches keycloak.org/v1alpha1 installs)"
-elif oc get keycloaks "$KEYCLOAK_CR_NAME" -n "$NAMESPACE" &>/dev/null; then
+KEYCLOAK_CR_NAME="rhsso-instance"
+
+# Determine the correct resource name (try both singular and plural)
+# The error message showed "keycloaks.k8s.keycloak.org", so try plural first
+KEYCLOAK_CRD="keycloaks"
+if oc get crd keycloaks.k8s.keycloak.org >/dev/null 2>&1 || oc get crd keycloaks.keycloak.org >/dev/null 2>&1; then
+    log "Detected Keycloak CRD: keycloaks"
     KEYCLOAK_CRD="keycloaks"
-    log "Using Keycloak API: keycloaks (k8s.keycloak.org)"
-elif oc get crd keycloaks.k8s.keycloak.org &>/dev/null || oc get crd keycloaks.keycloak.org &>/dev/null; then
-    log "Detected Keycloak CRD: keycloaks (no $KEYCLOAK_CR_NAME yet)"
-    KEYCLOAK_CRD="keycloaks"
-elif oc get crd keycloak.k8s.keycloak.org &>/dev/null || oc get crd keycloak.keycloak.org &>/dev/null; then
+elif oc get crd keycloak.k8s.keycloak.org >/dev/null 2>&1 || oc get crd keycloak.keycloak.org >/dev/null 2>&1; then
     log "Detected Keycloak CRD: keycloak"
     KEYCLOAK_CRD="keycloak"
 else
-    if oc get keycloaks -n "$NAMESPACE" &>/dev/null; then
+    # Try to determine by attempting to list resources
+    if oc get keycloaks -n $NAMESPACE >/dev/null 2>&1; then
         KEYCLOAK_CRD="keycloaks"
-        log "Using resource name: keycloaks (list API)"
-    elif oc get keycloak -n "$NAMESPACE" &>/dev/null; then
+        log "Using resource name: keycloaks (detected via API)"
+    elif oc get keycloak -n $NAMESPACE >/dev/null 2>&1; then
         KEYCLOAK_CRD="keycloak"
-        log "Using resource name: keycloak (list API)"
+        log "Using resource name: keycloak (detected via API)"
     else
+        # Default to keycloak (singular) as that's what the manifest uses
         KEYCLOAK_CRD="keycloak"
-        warning "Could not determine Keycloak resource API; defaulting to 'keycloak' for apply/get"
+        warning "Could not determine Keycloak resource name, defaulting to 'keycloak'"
     fi
 fi
 
@@ -690,28 +666,16 @@ else
     log "✓ Keycloak instance is ready"
 fi
 
-fi
-
 # Get Keycloak URLs and credentials
 log ""
 log "Retrieving Keycloak access information..."
 
-KEYCLOAK_EXTERNAL_URL=""
-if [ "$SKIP_TO_SUMMARY" = true ] && [ -n "${ROUTE_KEYCLOAK_HOST:-}" ]; then
-    KEYCLOAK_EXTERNAL_URL="https://${ROUTE_KEYCLOAK_HOST}"
-fi
-
-# Try to get URLs from CR first (skip redundant get when verify-only path already set URL)
-if [ -z "$KEYCLOAK_EXTERNAL_URL" ]; then
-    KEYCLOAK_EXTERNAL_URL=$(oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $NAMESPACE -o jsonpath='{.status.externalURL}' 2>/dev/null || echo "")
-fi
+# Try to get URLs from CR first
+KEYCLOAK_EXTERNAL_URL=$(oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $NAMESPACE -o jsonpath='{.status.externalURL}' 2>/dev/null || echo "")
 KEYCLOAK_INTERNAL_URL=$(oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $NAMESPACE -o jsonpath='{.status.internalURL}' 2>/dev/null || echo "")
 KEYCLOAK_CREDENTIAL_SECRET=$(oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $NAMESPACE -o jsonpath='{.status.credentialSecret}' 2>/dev/null || echo "")
 
 # If CR doesn't exist, try to get URL from route
-if [ -z "$KEYCLOAK_EXTERNAL_URL" ]; then
-    KEYCLOAK_EXTERNAL_URL=$(oc get route keycloak-rhsso -n $NAMESPACE -o jsonpath='https://{.spec.host}' 2>/dev/null || echo "")
-fi
 if [ -z "$KEYCLOAK_EXTERNAL_URL" ]; then
     KEYCLOAK_EXTERNAL_URL=$(oc get route keycloak -n $NAMESPACE -o jsonpath='https://{.spec.host}' 2>/dev/null || echo "")
 fi
@@ -752,10 +716,7 @@ log "========================================================="
 log "Keycloak Installation Summary"
 log "========================================================="
 log "Namespace: $NAMESPACE"
-if [ "$SKIP_TO_SUMMARY" = true ]; then
-    log "Keycloak: already installed (workshop / shared cluster — script skipped install)"
-    log "Status: Ready (route + StatefulSet verified)"
-elif oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $NAMESPACE >/dev/null 2>&1; then
+if oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $NAMESPACE >/dev/null 2>&1; then
     log "Keycloak CR: $KEYCLOAK_CR_NAME"
     log "Status: Ready"
 else

@@ -780,20 +780,23 @@ echo "Installing RHTAS Operator..."
 # Ensure we're targeting the correct namespace
 OPERATOR_NAMESPACE="openshift-operators"
 
+# OLM Subscription (use full API; short name "subscription" resolves to ACM on many clusters)
+OLM_SUB="subscription.operators.coreos.com"
+
 # Check if subscription already exists in the correct namespace
-if oc get subscription trusted-artifact-signer -n $OPERATOR_NAMESPACE >/dev/null 2>&1; then
+if oc get "${OLM_SUB}" trusted-artifact-signer -n $OPERATOR_NAMESPACE >/dev/null 2>&1; then
     echo "RHTAS Operator subscription 'trusted-artifact-signer' already exists in $OPERATOR_NAMESPACE, skipping creation"
 else
     # Clean up any subscriptions in wrong namespaces (optional, but helpful)
     echo "Checking for subscriptions in incorrect namespaces..."
-    WRONG_SUBS=$(oc get subscription -A -o jsonpath='{range .items[?(@.metadata.name=="trusted-artifact-signer" && @.metadata.namespace!="openshift-operators")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || echo "")
+    WRONG_SUBS=$(oc get "${OLM_SUB}" -A -o jsonpath='{range .items[?(@.metadata.name=="trusted-artifact-signer" && @.metadata.namespace!="openshift-operators")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || echo "")
     if [ -n "$WRONG_SUBS" ]; then
         echo "Warning: Found subscriptions in incorrect namespaces:"
         echo "$WRONG_SUBS" | while read -r ns name; do
             echo "  - $ns/$name"
         done
         echo "  These should only exist in $OPERATOR_NAMESPACE namespace"
-        echo "  To clean them up, run: oc delete subscription trusted-artifact-signer -n <namespace>"
+        echo "  To clean them up, run: oc delete ${OLM_SUB} trusted-artifact-signer -n <namespace>"
     fi
     
     cat <<EOF | oc apply -f -
@@ -849,7 +852,7 @@ done
 if [ -z "$CSV_NAME" ]; then
     echo "Error: Could not find RHTAS Operator CSV after ${MAX_WAIT_CSV} seconds"
     echo "Please check the subscription status:"
-    oc get subscription trusted-artifact-signer -n openshift-operators -o yaml
+    oc get "${OLM_SUB}" trusted-artifact-signer -n openshift-operators -o yaml
     exit 1
 fi
 

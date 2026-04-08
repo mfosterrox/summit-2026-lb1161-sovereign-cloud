@@ -8,6 +8,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Keycloak + RHTAS run on the hub; align with lab parallel drivers.
+KUBE_CONTEXT="${KUBE_CONTEXT:-local-cluster}"
+oc config use-context "$KUBE_CONTEXT" &>/dev/null || true
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -171,11 +175,21 @@ if [ "$SKIP_KEYCLOAK" = false ]; then
     log "Retrieving Keycloak access information..."
     KEYCLOAK_NAMESPACE="rhsso"
     KEYCLOAK_CR_NAME="rhsso-instance"
-    
+    if [ -n "${KEYCLOAK_NAMESPACE_OVERRIDE:-}" ] && oc get namespace "$KEYCLOAK_NAMESPACE_OVERRIDE" >/dev/null 2>&1; then
+        KEYCLOAK_NAMESPACE="$KEYCLOAK_NAMESPACE_OVERRIDE"
+    elif ! oc get namespace rhsso >/dev/null 2>&1 && oc get namespace keycloak >/dev/null 2>&1; then
+        KEYCLOAK_NAMESPACE="keycloak"
+        KEYCLOAK_CR_NAME="keycloak"
+    fi
+
     # Determine the correct CRD name
     KEYCLOAK_CRD="keycloaks"
     if ! oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $KEYCLOAK_NAMESPACE >/dev/null 2>&1; then
         KEYCLOAK_CRD="keycloak"
+    fi
+    if ! oc get $KEYCLOAK_CRD $KEYCLOAK_CR_NAME -n $KEYCLOAK_NAMESPACE >/dev/null 2>&1 && oc get keycloaks keycloak -n $KEYCLOAK_NAMESPACE >/dev/null 2>&1; then
+        KEYCLOAK_CR_NAME="keycloak"
+        KEYCLOAK_CRD="keycloaks"
     fi
     
     # Get Keycloak external URL
@@ -254,7 +268,7 @@ if [ "$SKIP_KEYCLOAK" = false ]; then
 fi
 
 log "To verify the installation:"
-log "  oc get pods -n rhsso"
+log "  oc get pods -n ${KEYCLOAK_NAMESPACE:-rhsso}"
 log "  oc get pods -n trusted-artifact-signer"
 log "  oc get securesigns -n trusted-artifact-signer"
 log ""
