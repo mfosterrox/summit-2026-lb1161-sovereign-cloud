@@ -2,7 +2,7 @@ apiVersion: monitoring.rhobs/v1alpha1
 kind: MonitoringStack
 metadata:
   name: sample-stackrox-monitoring-stack
-  namespace: rhacs-operator
+  namespace: stackrox
   finalizers:
     - monitoring.observability.openshift.io/finalizer
   labels:
@@ -22,4 +22,4 @@ spec:
     requests:
       cpu: 100m
       memory: 256Mi
-  retention: 1d
+  retention: 7d  # keep data longer (was 1d default)

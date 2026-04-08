@@ -1,10 +1,10 @@
 apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
 metadata:
-  name: sample-rhacs-operator-prometheus-server
-  namespace: rhacs-operator
+  name: sample-stackrox-prometheus-server
+  namespace: stackrox
 spec:
-  serviceAccountName: sample-rhacs-operator-prometheus-server
+  serviceAccountName: sample-stackrox-prometheus-server
   serviceMonitorSelector: {}
   podMonitorSelector: {}
   resources:
@@ -39,5 +39,5 @@ spec:
       mountPath: /var/run/secrets/tokens
       readOnly: true
   additionalScrapeConfigs:
-    name: sample-rhacs-operator-prometheus-additional-scrape-configs
+    name: sample-stackrox-prometheus-additional-scrape-configs
     key: prometheus-additional.yaml

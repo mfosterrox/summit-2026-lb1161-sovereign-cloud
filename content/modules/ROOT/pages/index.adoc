@@ -127,8 +127,8 @@ The following script can be run in the background while woring on the first modu
 cd ~ && git clone https://github.com/mfosterrox/summit-2026-lb1161-sovereign-cloud.git svc-lab
 cd ~/svc-lab
 ./lab-setup/run-all-setup.sh
-./tssc-setup/setup.sh
 ./ai-setup/setup.sh
+./tssc-setup/setup.sh
 ----
 +
 [IMPORTANT]
