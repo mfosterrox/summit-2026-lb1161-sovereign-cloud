@@ -816,42 +816,68 @@ EOF
     echo "✓ RHTAS Operator subscription created in $OPERATOR_NAMESPACE namespace"
 fi
 
+# Some clusters require InstallPlan approval even when spec.installPlanApproval is Automatic (policy / OLM).
+approve_rhtas_installplan_if_needed() {
+    local ip approved
+    ip=$(oc get "${OLM_SUB}" trusted-artifact-signer -n "$OPERATOR_NAMESPACE" -o jsonpath='{.status.installPlanRef.name}' 2>/dev/null || echo "")
+    [ -z "$ip" ] && return 0
+    approved=$(oc get installplan.operators.coreos.com "$ip" -n "$OPERATOR_NAMESPACE" -o jsonpath='{.spec.approved}' 2>/dev/null || echo "false")
+    if [ "$approved" != "true" ]; then
+        echo "  Approving InstallPlan '$ip' (pending approval — CSV will not exist until this is done)..."
+        oc patch installplan.operators.coreos.com "$ip" -n "$OPERATOR_NAMESPACE" --type merge -p '{"spec":{"approved":true}}' &>/dev/null || \
+            oc patch installplan "$ip" -n "$OPERATOR_NAMESPACE" --type merge -p '{"spec":{"approved":true}}' &>/dev/null || true
+    fi
+}
+
 # Wait for RHTAS Operator to be ready
 echo "Waiting for RHTAS Operator to be ready..."
 
 # First, wait for CSV to appear
 echo "Waiting for CSV to be created..."
 CSV_NAME=""
-MAX_WAIT_CSV=120
+MAX_WAIT_CSV=300
 WAIT_COUNT=0
 
+approve_rhtas_installplan_if_needed
+
 while [ $WAIT_COUNT -lt $MAX_WAIT_CSV ]; do
+    approve_rhtas_installplan_if_needed
+
     # Try multiple methods to find the CSV
     CSV_NAME=$(oc get csv -n openshift-operators -o jsonpath='{.items[?(@.spec.displayName=="Trusted Artifact Signer Operator")].metadata.name}' 2>/dev/null || echo "")
     if [ -z "$CSV_NAME" ]; then
-        CSV_NAME=$(oc get csv -n openshift-operators -o name 2>/dev/null | grep -i "trusted-artifact-signer\|rhtas" | head -1 | sed 's|clusterserviceversion.operators.coreos.com/||' || echo "")
+        CSV_NAME=$(oc get csv -n openshift-operators -o name 2>/dev/null | grep -iE "trusted-artifact-signer|rhtas-operator" | head -1 | sed 's|clusterserviceversion.operators.coreos.com/||' || echo "")
     fi
     if [ -z "$CSV_NAME" ]; then
         CSV_NAME=$(oc get csv -n openshift-operators -l operators.coreos.com/trusted-artifact-signer.openshift-operators -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     fi
-    
+    # Subscription already resolved target CSV (often before the CSV object exists)
+    if [ -z "$CSV_NAME" ]; then
+        _csv_from_sub=$(oc get "${OLM_SUB}" trusted-artifact-signer -n "$OPERATOR_NAMESPACE" -o jsonpath='{.status.currentCSV}' 2>/dev/null || echo "")
+        if [ -n "$_csv_from_sub" ] && oc get csv "$_csv_from_sub" -n openshift-operators &>/dev/null; then
+            CSV_NAME="$_csv_from_sub"
+        fi
+    fi
+
     if [ -n "$CSV_NAME" ]; then
         echo "✓ Found CSV: $CSV_NAME"
         break
     fi
-    
+
     sleep 5
     WAIT_COUNT=$((WAIT_COUNT + 5))
     if [ $((WAIT_COUNT % 30)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
         echo "  Still waiting for CSV to appear... (${WAIT_COUNT}s/${MAX_WAIT_CSV}s)"
         echo "    Checking available CSVs..."
-        oc get csv -n openshift-operators -o name 2>/dev/null | head -3 || echo "    No CSVs found yet"
+        oc get csv -n openshift-operators -o name 2>/dev/null | grep -i rhtas | head -3 || oc get csv -n openshift-operators -o name 2>/dev/null | head -3 || echo "    No CSVs found yet"
     fi
 done
 
 if [ -z "$CSV_NAME" ]; then
     echo "Error: Could not find RHTAS Operator CSV after ${MAX_WAIT_CSV} seconds"
-    echo "Please check the subscription status:"
+    echo "If subscription shows InstallPlanPending / RequiresApproval, the script should approve the InstallPlan automatically; check RBAC (cluster-admin) and:"
+    echo "  oc get installplan -n openshift-operators"
+    echo "  oc describe subscription.operators.coreos.com trusted-artifact-signer -n openshift-operators"
     oc get "${OLM_SUB}" trusted-artifact-signer -n openshift-operators -o yaml
     exit 1
 fi
