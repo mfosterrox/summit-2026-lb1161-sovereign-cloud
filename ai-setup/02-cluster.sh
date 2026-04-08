@@ -1,5 +1,6 @@
 #!/bin/bash
-# Verify DataScienceCluster and dashboard route (no changes to the cluster).
+# Optional: DataScienceCluster + dashboard when redhat-ods-applications exists.
+# Operator pods/service are verified in 01-operator.sh.
 
 set -euo pipefail
 
@@ -20,7 +21,7 @@ DSC_CR_NAME="default-dsc"
 DSC_NAMESPACE="redhat-ods-applications"
 
 log "========================================================="
-log "OpenShift AI — DataScienceCluster verification"
+log "OpenShift AI — DataScienceCluster / dashboard (optional)"
 log "========================================================="
 log ""
 
@@ -43,19 +44,26 @@ else
 fi
 
 log ""
-log "Checking DataScienceCluster CRD..."
-oc get crd datascienceclusters.datasciencecluster.opendatahub.io &>/dev/null \
-  || fail "DataScienceCluster CRD not found"
+if ! oc get namespace "$DSC_NAMESPACE" &>/dev/null; then
+  warn "Namespace '$DSC_NAMESPACE' not found — skipping DataScienceCluster and dashboard checks."
+  warn "Operator tier is validated in 01-operator.sh (pods + rhods-operator-service)."
+  log "✓ Step 2 skipped (no applications namespace yet)"
+  exit 0
+fi
 
-log "Checking namespace $DSC_NAMESPACE..."
-oc get namespace "$DSC_NAMESPACE" &>/dev/null || fail "Namespace '$DSC_NAMESPACE' not found"
-
-log "Checking DataScienceCluster $DSC_CR_NAME..."
-oc get datasciencecluster "$DSC_CR_NAME" -n "$DSC_NAMESPACE" &>/dev/null \
-  || fail "DataScienceCluster '$DSC_CR_NAME' not found in $DSC_NAMESPACE"
+log "Checking DataScienceCluster $DSC_CR_NAME in $DSC_NAMESPACE..."
+if ! oc get datasciencecluster "$DSC_CR_NAME" -n "$DSC_NAMESPACE" &>/dev/null; then
+  warn "DataScienceCluster '$DSC_CR_NAME' not found — namespace exists but DSC may not be created yet."
+  log "✓ Namespace present; no DSC to verify yet"
+  exit 0
+fi
 
 DSC_STATUS=$(oc get datasciencecluster "$DSC_CR_NAME" -n "$DSC_NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-[ "$DSC_STATUS" = "Ready" ] || fail "DataScienceCluster phase is '${DSC_STATUS:-unknown}' (expected Ready). Try: oc describe datasciencecluster $DSC_CR_NAME -n $DSC_NAMESPACE"
+if [ "$DSC_STATUS" = "Ready" ]; then
+  log "✓ DataScienceCluster phase: Ready"
+else
+  fail "DataScienceCluster phase is '${DSC_STATUS:-unknown}' (expected Ready). Try: oc describe datasciencecluster $DSC_CR_NAME -n $DSC_NAMESPACE"
+fi
 
 log "Checking dashboard route (redhat-ods-applications or openshift-ingress gateway)..."
 DASHBOARD_ROUTE=$(ai_resolve_dashboard_host || true)

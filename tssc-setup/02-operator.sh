@@ -2,7 +2,7 @@
 
 # Script to install Red Hat Trusted Artifact Signer (RHTAS) with Red Hat SSO (Keycloak) as OIDC provider on OpenShift
 # Assumes oc is installed and user is logged in as cluster-admin
-# Assumes Red Hat SSO (Keycloak) is installed; namespace from KEYCLOAK_NAMESPACE, rhsso, or route discovery
+# Assumes Keycloak is installed (RH SSO/rhsso, or Red Hat build of Keycloak rhbk-operator / namespace keycloak, etc.)
 # Usage: ./08-install-trusted-artifact-signer.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,16 +16,27 @@ if [ -n "${KEYCLOAK_NAMESPACE:-}" ] && oc get namespace "$KEYCLOAK_NAMESPACE" >/
 elif oc get namespace rhsso >/dev/null 2>&1; then
     KEYCLOAK_NS="rhsso"
 else
-    _routes_out=$(oc get routes -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        _r_ns="${line%% *}"
-        _r_name="${line#* }"
-        if [ "$_r_name" = "keycloak-rhsso" ]; then
-            KEYCLOAK_NS="$_r_ns"
-            break
+    # Red Hat build of Keycloak (OLM): Subscription metadata.name is often rhbk-operator (namespace commonly "keycloak")
+    KEYCLOAK_NS=$(oc get subscription.operators.coreos.com -A -o jsonpath='{range .items[?(@.metadata.name=="rhbk-operator")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1)
+    if [ -z "$KEYCLOAK_NS" ] && oc get namespace keycloak >/dev/null 2>&1; then
+        if oc get subscription.operators.coreos.com rhbk-operator -n keycloak >/dev/null 2>&1 \
+            || oc get statefulset keycloak -n keycloak >/dev/null 2>&1 \
+            || oc get deployment -n keycloak -l app.kubernetes.io/name=keycloak --no-headers 2>/dev/null | grep -q .; then
+            KEYCLOAK_NS="keycloak"
         fi
-    done <<< "$_routes_out"
+    fi
+    if [ -z "$KEYCLOAK_NS" ]; then
+        _routes_out=$(oc get routes -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            _r_ns="${line%% *}"
+            _r_name="${line#* }"
+            if [ "$_r_name" = "keycloak-rhsso" ]; then
+                KEYCLOAK_NS="$_r_ns"
+                break
+            fi
+        done <<< "$_routes_out"
+    fi
     if [ -z "$KEYCLOAK_NS" ]; then
         while IFS= read -r line; do
             [ -z "$line" ] && continue
@@ -41,7 +52,7 @@ fi
 
 if [ -z "$KEYCLOAK_NS" ]; then
     echo "Error: Could not determine the Keycloak namespace."
-    echo "Set KEYCLOAK_NAMESPACE to the namespace where Keycloak runs, or install Keycloak with ./01-keycloak.sh"
+    echo "Set KEYCLOAK_NAMESPACE (e.g. keycloak for rhbk-operator), or install Keycloak / RH SSO with ./01-keycloak.sh"
     exit 1
 fi
 echo "Using Keycloak namespace: ${KEYCLOAK_NS}"
@@ -80,20 +91,38 @@ else
     if [ "$KEYCLOAK_STS_READY" = "1/1" ] && [ "$KEYCLOAK_POD_RUNNING" = "Running" ]; then
         echo "✓ Keycloak resources are running (CR not found, but installation appears successful)"
         KEYCLOAK_CR_EXISTS=false
+    elif oc get subscription.operators.coreos.com rhbk-operator -n "$KEYCLOAK_NS" >/dev/null 2>&1; then
+        echo "✓ Red Hat build of Keycloak (Subscription rhbk-operator) in ${KEYCLOAK_NS} — legacy RH-SSO CR/STS checks skipped"
+        KEYCLOAK_CR_EXISTS=false
     else
         echo "Error: Keycloak custom resource not found in namespace ${KEYCLOAK_NS} and resources are not running"
-        echo "Please install Red Hat SSO (Keycloak) first by running: ./01-keycloak.sh"
+        echo "Install RH SSO (./01-keycloak.sh) or Red Hat Keycloak (rhbk-operator), or set KEYCLOAK_NAMESPACE"
         exit 1
     fi
 fi
 
-KEYCLOAK_ROUTE=$(oc get route keycloak-rhsso -n "$KEYCLOAK_NS" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+KEYCLOAK_ROUTE=""
+for _rt in keycloak-rhsso keycloak rhbk-keycloak; do
+    KEYCLOAK_ROUTE=$(oc get route "$_rt" -n "$KEYCLOAK_NS" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    [ -n "$KEYCLOAK_ROUTE" ] && break
+done
 if [ -z "$KEYCLOAK_ROUTE" ]; then
-    KEYCLOAK_ROUTE=$(oc get route keycloak -n "$KEYCLOAK_NS" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+    # RHBK / single-route installs: any route in the namespace whose name suggests Keycloak
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        _rn="${line%% *}"
+        case "$_rn" in *keycloak*|*rhbk*|*sso*) KEYCLOAK_ROUTE=$(oc get route "$_rn" -n "$KEYCLOAK_NS" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+            [ -n "$KEYCLOAK_ROUTE" ] && break
+            ;;
+        esac
+    done < <(oc get route -n "$KEYCLOAK_NS" --no-headers 2>/dev/null | awk '{print $1}')
 fi
 if [ -z "$KEYCLOAK_ROUTE" ]; then
-    echo "Error: Could not retrieve Keycloak route (keycloak-rhsso or keycloak) from namespace ${KEYCLOAK_NS}"
-    echo "Keycloak may still be installing. Please wait for it to be ready, or run: ./01-keycloak.sh"
+    KEYCLOAK_ROUTE=$(oc get routes -n "$KEYCLOAK_NS" -o jsonpath='{range .items[*]}{.spec.host}{"\n"}{end}' 2>/dev/null | grep -m1 '[[:alnum:]]' || true)
+fi
+if [ -z "$KEYCLOAK_ROUTE" ]; then
+    echo "Error: Could not retrieve a Keycloak route host in namespace ${KEYCLOAK_NS}"
+    echo "Keycloak may still be installing. Try: oc get route -n ${KEYCLOAK_NS}"
     exit 1
 fi
 
@@ -126,8 +155,11 @@ while [ $WAIT_COUNT -lt $MAX_WAIT_KEYCLOAK ]; do
         break
     fi
     
-    # Fallback: Check if Keycloak pods are running
+    # Fallback: Check if Keycloak pods are running (RH-SSO label or RHBK operator label)
     KEYCLOAK_PODS_READY=$(oc get pods -n "$KEYCLOAK_NS" -l app=keycloak --field-selector=status.phase=Running -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
+    if [ "$KEYCLOAK_PODS_READY" != "Running" ]; then
+        KEYCLOAK_PODS_READY=$(oc get pods -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak --field-selector=status.phase=Running -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
+    fi
     if [ "$KEYCLOAK_PODS_READY" = "Running" ]; then
         # Check if route exists and pods are running - consider it ready
         if [ -n "$KEYCLOAK_ROUTE" ]; then
@@ -153,6 +185,15 @@ while [ $WAIT_COUNT -lt $MAX_WAIT_KEYCLOAK ]; do
             break
         fi
     fi
+
+    # RHBK: Deployment with app.kubernetes.io/name=keycloak
+    _k_r=$(oc get deployment -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].status.readyReplicas}' 2>/dev/null || echo "")
+    _k_w=$(oc get deployment -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].spec.replicas}' 2>/dev/null || echo "")
+    if [ -n "$_k_r" ] && [ -n "$_k_w" ] && [ "$_k_w" != "0" ] && [ "$_k_r" = "$_k_w" ] && [ -n "$KEYCLOAK_ROUTE" ]; then
+        KEYCLOAK_READY=true
+        echo "✓ Keycloak instance is ready (RHBK Deployment + route)"
+        break
+    fi
     
     sleep 5
     WAIT_COUNT=$((WAIT_COUNT + 5))
@@ -164,8 +205,9 @@ done
 if [ "$KEYCLOAK_READY" = false ]; then
     echo "Warning: Keycloak instance did not become ready within ${MAX_WAIT_KEYCLOAK} seconds, but continuing..."
     echo "  Checking current status..."
-    oc get pods -n "$KEYCLOAK_NS" -l app=keycloak 2>/dev/null || echo "  No Keycloak pods found"
-    oc get route keycloak-rhsso -n "$KEYCLOAK_NS" 2>/dev/null || oc get route keycloak -n "$KEYCLOAK_NS" 2>/dev/null || echo "  No Keycloak route found"
+    oc get pods -n "$KEYCLOAK_NS" -l app=keycloak 2>/dev/null || true
+    oc get pods -n "$KEYCLOAK_NS" -l app.kubernetes.io/name=keycloak 2>/dev/null || echo "  No Keycloak-labeled pods found"
+    oc get route keycloak-rhsso -n "$KEYCLOAK_NS" 2>/dev/null || oc get route keycloak -n "$KEYCLOAK_NS" 2>/dev/null || oc get route -n "$KEYCLOAK_NS" 2>/dev/null || echo "  No routes in namespace"
 fi
 
 # Step 3: Ensure OpenShift realm exists (using KeycloakRealm CR)

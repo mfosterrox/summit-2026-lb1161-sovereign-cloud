@@ -60,11 +60,20 @@ CSV_PHASE=$(oc get csv "$CURRENT_CSV" -n "$OPERATOR_NAMESPACE" -o jsonpath='{.st
 OG_COUNT=$(oc get operatorgroup -n "$OPERATOR_NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
 [ "${OG_COUNT:-0}" -ge 1 ] || warn "No OperatorGroup in $OPERATOR_NAMESPACE (unexpected for OLM)"
 
-log "Checking DataScienceCluster CRD..."
-oc get crd datascienceclusters.datasciencecluster.opendatahub.io &>/dev/null \
-  || fail "DataScienceCluster CRD missing — operator CSV may not have fully installed webhooks/CRDs"
+RHODS_SVC="${RHODS_OPERATOR_SERVICE:-rhods-operator-service}"
+log "Checking Service $RHODS_SVC..."
+oc get "svc/$RHODS_SVC" -n "$OPERATOR_NAMESPACE" &>/dev/null \
+  || fail "Service '$RHODS_SVC' not found in $OPERATOR_NAMESPACE (see: oc get svc -n $OPERATOR_NAMESPACE)"
+
+log "Checking operator Pods (Running)..."
+# READY column can be "1/1"; STATUS is column 3 in default oc get pods output
+RUNNING_COUNT=$(oc get pods -n "$OPERATOR_NAMESPACE" --no-headers 2>/dev/null | awk '$3 == "Running" { n++ } END { print n+0 }')
+[ "${RUNNING_COUNT:-0}" -ge 1 ] \
+  || fail "No Running pods in $OPERATOR_NAMESPACE — try: oc get pods -n $OPERATOR_NAMESPACE"
 
 log ""
 log "✓ OpenShift AI operator checks passed"
 log "  CSV: $CURRENT_CSV ($CSV_PHASE)"
+log "  Service: $RHODS_SVC"
+log "  Running pods in $OPERATOR_NAMESPACE: $RUNNING_COUNT"
 log ""

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verify Red Hat OpenShift AI is installed (operator + DataScienceCluster). Read-only checks only.
+# Verify Red Hat OpenShift AI: operator pods + service; optional DSC when applications namespace exists.
 
 set -euo pipefail
 
@@ -24,8 +24,8 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0"
       echo ""
       echo "Runs read-only verification that OpenShift AI is installed:"
-      echo "  1. Operator / CSV / CRD (01-operator.sh)"
-      echo "  2. DataScienceCluster Ready + dashboard route (02-cluster.sh)"
+      echo "  1. Operator CSV + rhods-operator-service + Running pods (01-operator.sh)"
+      echo "  2. If redhat-ods-applications exists: DataScienceCluster Ready + dashboard (02-cluster.sh)"
       echo ""
       echo "Requires: oc, logged in, context local-cluster (script will switch if present)."
       exit 0
