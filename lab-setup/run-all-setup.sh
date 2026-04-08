@@ -1,6 +1,6 @@
 #!/bin/bash
-# Master script to execute lab setup scripts in order (00 → 03).
-# 00: roxctl · 01: Central (local-cluster) · 02: Compliance (local + aws-us) · 03: verify RHACS Central + Secured Cluster (local + aws-us).
+# Master script to execute lab setup scripts in order (00 → 04).
+# 00: roxctl · 01: Central · 02: Compliance (local + aws-us) · 03: verify RHACS · 04: apps (parallel local + aws-us).
 
 set -euo pipefail
 
@@ -33,6 +33,7 @@ SCRIPTS=(
     "01-central-configuration.sh"
     "02-compliance-operator-install.sh"
     "03-secured-cluster-aws-us.sh"
+    "04-deploy-applications.sh"
 )
 
 log "========================================================="
