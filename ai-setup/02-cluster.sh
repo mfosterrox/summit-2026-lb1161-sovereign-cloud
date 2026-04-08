@@ -4,6 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=resolve-dashboard-host.sh
+source "${SCRIPT_DIR}/resolve-dashboard-host.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -55,13 +57,10 @@ oc get datasciencecluster "$DSC_CR_NAME" -n "$DSC_NAMESPACE" &>/dev/null \
 DSC_STATUS=$(oc get datasciencecluster "$DSC_CR_NAME" -n "$DSC_NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
 [ "$DSC_STATUS" = "Ready" ] || fail "DataScienceCluster phase is '${DSC_STATUS:-unknown}' (expected Ready). Try: oc describe datasciencecluster $DSC_CR_NAME -n $DSC_NAMESPACE"
 
-log "Checking dashboard route..."
-DASHBOARD_ROUTE=$(oc get route rhods-dashboard -n "$DSC_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+log "Checking dashboard route (redhat-ods-applications or openshift-ingress gateway)..."
+DASHBOARD_ROUTE=$(ai_resolve_dashboard_host || true)
 if [ -z "$DASHBOARD_ROUTE" ]; then
-  DASHBOARD_ROUTE=$(oc get route -n "$DSC_NAMESPACE" -l app=odh-dashboard -o jsonpath='{.items[0].spec.host}' 2>/dev/null || echo "")
-fi
-if [ -z "$DASHBOARD_ROUTE" ]; then
-  warn "No rhods-dashboard / odh-dashboard route found yet (DSC is Ready — route may differ by version)"
+  warn "No dashboard host found. Check: oc get route -n $DSC_NAMESPACE; oc get route -n openshift-ingress | egrep 'rhods-dashboard|data-science-gateway'"
 else
   log "✓ Dashboard host: $DASHBOARD_ROUTE"
 fi

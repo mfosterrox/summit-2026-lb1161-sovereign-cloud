@@ -4,6 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=resolve-dashboard-host.sh
+source "${SCRIPT_DIR}/resolve-dashboard-host.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -58,10 +60,7 @@ log "  oc get pods -n redhat-ods-applications"
 log ""
 
 DSC_NAMESPACE="redhat-ods-applications"
-DASHBOARD_ROUTE=$(oc get route rhods-dashboard -n "$DSC_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-if [ -z "$DASHBOARD_ROUTE" ]; then
-  DASHBOARD_ROUTE=$(oc get route -n "$DSC_NAMESPACE" -l app=odh-dashboard -o jsonpath='{.items[0].spec.host}' 2>/dev/null || echo "")
-fi
+DASHBOARD_ROUTE=$(ai_resolve_dashboard_host || true)
 
 log "========================================================="
 log "OpenShift AI access (informational)"
@@ -69,7 +68,7 @@ log "========================================================="
 if [ -n "$DASHBOARD_ROUTE" ]; then
   log "Dashboard URL: https://$DASHBOARD_ROUTE"
 else
-  warn "Dashboard route not resolved here; list: oc get routes -n $DSC_NAMESPACE"
+  warn "Dashboard host not resolved; try: oc get route -n $DSC_NAMESPACE; oc get route -n openshift-ingress | egrep 'rhods-dashboard|data-science-gateway'"
 fi
 log "Username: admin (or your OpenShift identity provider user)"
 
