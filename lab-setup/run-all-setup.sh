@@ -27,7 +27,7 @@ warning() {
     echo -e "${YELLOW}[SETUP-MASTER] WARNING:${NC} $1"
 }
 
-# Numbered scripts (02–04 manage contexts internally where needed; 00–01 and 06 pre-switched to local-cluster)
+# Numbered scripts (02 and 04 manage contexts internally where needed; 00–01, 03, and 06 pre-switch to local-cluster)
 SCRIPTS=(
     "00-install-roxctl.sh"
     "01-central-configuration.sh"
@@ -75,8 +75,8 @@ for idx in "${!SCRIPTS[@]}"; do
     log "Executing script $CURRENT/$TOTAL: $script"
     log "========================================================="
     
-    # 00–01 and 06 expect local-cluster (06 uses default oc context for rhacs-operator / COO)
-    if [[ "$script" =~ ^0[0-1]-|^06- ]]; then
+    # 00–01, 03 (Central lives only on local-cluster), and 06 expect local-cluster first
+    if [[ "$script" =~ ^0[0-1]-|^03-|^06- ]]; then
         log "Ensuring local-cluster context for script $script..."
         if oc config use-context local-cluster >/dev/null 2>&1; then
             log "✓ Switched to local-cluster context"
