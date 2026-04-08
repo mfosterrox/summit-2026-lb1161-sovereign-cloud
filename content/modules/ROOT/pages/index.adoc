@@ -114,26 +114,23 @@ EOF
 source ~/.bashrc
 ----
 +
-. Next, clone the repository and run the setup scripts to configure your environmen
+. Next, clone the repository and run the parallel setup driver to configure your environment (lab automation, Trusted Artifact Signer, and OpenShift AI checks run at the same time with a progress bar).
 +
-
-[IMPORTANT] 
+[IMPORTANT]
 ====
-The following script can be run in the background while woring on the first module. You DO NOT have to wait for it to finish before proceeding to module 1.
+The following command can run while you work on the first module. You do not have to wait for it to finish before starting module 1. If any stream fails, the script prints which one failed, shows the last lines of its log, and the exact command to run again for that stream only.
 ====
 +
 [source,sh,subs="attributes",role=execute]
 ----
 cd ~ && git clone https://github.com/mfosterrox/summit-2026-lb1161-sovereign-cloud.git svc-lab
 cd ~/svc-lab
-./lab-setup/run-all-setup.sh
-./ai-setup/setup.sh
-./tssc-setup/setup.sh
+bash setup.sh
 ----
 +
 [IMPORTANT]
 ====
-You will be asked to run the same script at the beginning of module 2, 3 and 4 to verify that everything is working as expected.
+At the beginning of modules 2, 3, and 4 you will be asked to run `bash run-parallel-setup.sh` again (or the individual setup script for the area you are working in) to verify that everything is still healthy.
 ====
 
 === OpenShift Console Access
