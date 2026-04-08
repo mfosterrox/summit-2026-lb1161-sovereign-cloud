@@ -32,17 +32,18 @@ error() {
 # Trap to show error details on exit
 trap 'error "Command failed: $(cat <<< "$BASH_COMMAND")"' ERR
 
-# Check current context and switch to local-cluster if needed
+# Target cluster (default local-cluster; run-all passes TARGET_CLUSTER_CONTEXT=aws-us for second pass)
+TARGET_CONTEXT="${TARGET_CLUSTER_CONTEXT:-local-cluster}"
 CURRENT_CONTEXT=$(oc config current-context 2>/dev/null || echo "")
-if [ "$CURRENT_CONTEXT" != "local-cluster" ]; then
-    log "Current context is '$CURRENT_CONTEXT'. Switching to 'local-cluster'..."
-    if oc config use-context local-cluster >/dev/null 2>&1; then
-        log "✓ Switched to 'local-cluster' context"
+if [ "$CURRENT_CONTEXT" != "$TARGET_CONTEXT" ]; then
+    log "Current context is '$CURRENT_CONTEXT'. Switching to '$TARGET_CONTEXT'..."
+    if oc config use-context "$TARGET_CONTEXT" >/dev/null 2>&1; then
+        log "✓ Switched to '$TARGET_CONTEXT' context"
     else
-        error "Failed to switch to 'local-cluster' context. Please ensure the context exists."
+        error "Failed to switch to '$TARGET_CONTEXT' context. Please ensure the context exists."
     fi
 else
-    log "✓ Already in 'local-cluster' context"
+    log "✓ Already in '$TARGET_CONTEXT' context"
 fi
 
 # Function to save variable to ~/.bashrc
@@ -442,16 +443,20 @@ log "========================================================="
 # This is important because RHACS is installed before Compliance Operator,
 # so the sensor needs to restart to sync any existing compliance results
 log ""
-log "Restarting RHACS sensor to sync Compliance Operator results..."
-RHACS_NAMESPACE="rhacs-operator"
+log "Restarting RHACS sensor to sync Compliance Operator results (if present on $TARGET_CONTEXT)..."
+RHACS_NAMESPACE=""
+for ns in stackrox rhacs-operator; do
+    if oc get deployment sensor -n "$ns" &>/dev/null 2>&1; then
+        RHACS_NAMESPACE="$ns"
+        break
+    fi
+done
 
 if command -v oc &>/dev/null && oc whoami &>/dev/null 2>&1; then
-    # Check if sensor exists (RHACS should be installed by now)
-    if oc get deployment sensor -n "$RHACS_NAMESPACE" &>/dev/null 2>&1; then
-        log "Found RHACS sensor deployment, restarting sensor pods..."
+    if [ -n "$RHACS_NAMESPACE" ]; then
+        log "Found RHACS sensor in namespace $RHACS_NAMESPACE, restarting sensor pods..."
         if oc delete pods -l app.kubernetes.io/component=sensor -n "$RHACS_NAMESPACE" &>/dev/null 2>&1; then
             log "✓ Sensor pods deleted, waiting for restart..."
-            # Wait for sensor to be ready (with timeout)
             if oc wait --for=condition=Available deployment/sensor -n "$RHACS_NAMESPACE" --timeout=120s &>/dev/null 2>&1; then
                 log "✓ Sensor pods restarted successfully"
             else
@@ -461,12 +466,11 @@ if command -v oc &>/dev/null && oc whoami &>/dev/null 2>&1; then
             warning "Could not restart sensor pods (may not exist yet or already restarting)"
         fi
     else
-        log "RHACS sensor not found in namespace $RHACS_NAMESPACE, skipping sensor restart"
+        log "RHACS sensor not found in stackrox or rhacs-operator on this cluster, skipping sensor restart"
         log "Note: Sensor will automatically sync compliance results when it starts"
     fi
 else
     log "OpenShift CLI (oc) not available, skipping sensor restart"
-    log "Note: You may need to manually restart the sensor: oc delete pods -l app.kubernetes.io/component=sensor -n $RHACS_NAMESPACE"
 fi
 log ""
 

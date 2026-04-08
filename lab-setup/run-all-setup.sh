@@ -1,11 +1,16 @@
 #!/bin/bash
-# Master script to execute all setup scripts in order
-# This script runs all numbered setup scripts sequentially
+# Master script to execute lab setup scripts in order (00 → 02).
+# 00: roxctl CLI · 01: RHACS Central CR (local-cluster) · 02: Compliance Operator (each cluster).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+context_exists() {
+    local name="$1"
+    oc config get-contexts -o name 2>/dev/null | sed 's|^context/||' | grep -qx "$name"
+}
 
 # Colors
 RED='\033[0;31m'
@@ -27,17 +32,11 @@ warning() {
     echo -e "${YELLOW}[SETUP-MASTER] WARNING:${NC} $1"
 }
 
-# Array of scripts to execute in order
+# Primary phase: roxctl, Central config, Compliance on local-cluster
 SCRIPTS=(
     "00-install-roxctl.sh"
     "01-central-configuration.sh"
     "02-compliance-operator-install.sh"
-    "03-deploy-applications.sh"
-    # "04-configure-rhacs-settings.sh"
-    # "05-setup-perses-monitoring.sh"
-    # "06-scs-second-cluster.sh"
-    # "07-compliance-operator-second-cluster.sh"
-    "08-deploy-applications-us.sh"
 )
 
 log "========================================================="
@@ -77,9 +76,8 @@ for idx in "${!SCRIPTS[@]}"; do
     log "Executing script $CURRENT/$TOTAL: $script"
     log "========================================================="
     
-    # Scripts 00-04 should run in local-cluster context
-    # Script 08 should run in aws-us context (handled by script itself)
-    if [[ "$script" =~ ^0[0-4]- ]]; then
+    # 00–02 expect local-cluster unless overridden (second pass sets TARGET_CLUSTER_CONTEXT for 02 only)
+    if [[ "$script" =~ ^0[0-2]- ]] && [ -z "${TARGET_CLUSTER_CONTEXT:-}" ]; then
         log "Ensuring local-cluster context for script $script..."
         if oc config use-context local-cluster >/dev/null 2>&1; then
             log "✓ Switched to local-cluster context"
@@ -102,6 +100,27 @@ for idx in "${!SCRIPTS[@]}"; do
     
     log ""
 done
+
+# Compliance Operator on second cluster (aws-us) when that context exists
+if context_exists aws-us; then
+    log "========================================================="
+    log "Compliance Operator: aws-us cluster"
+    log "========================================================="
+    if oc config use-context aws-us >/dev/null 2>&1; then
+        log "✓ Switched to aws-us context"
+        TARGET_CLUSTER_CONTEXT=aws-us bash "$SCRIPT_DIR/02-compliance-operator-install.sh"
+        log "✓ Completed compliance operator setup for aws-us"
+    else
+        warning "Could not switch to aws-us; skipping second-cluster compliance install"
+    fi
+    if oc config use-context local-cluster >/dev/null 2>&1; then
+        log "✓ Switched back to local-cluster context"
+    fi
+    log ""
+else
+    log "No aws-us context in kubeconfig; skipping Compliance Operator install on second cluster"
+    log ""
+fi
 
 # Restore original context if it was set
 if [ -n "$ORIGINAL_CONTEXT" ]; then
