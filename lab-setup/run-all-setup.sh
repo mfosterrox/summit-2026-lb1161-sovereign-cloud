@@ -1,6 +1,6 @@
 #!/bin/bash
-# Master script to execute lab setup scripts in order (00 → 05).
-# 00: roxctl · 01: Central · 02: Compliance · 03: verify RHACS · 04: apps · 05: RHACS API config.
+# Master script to execute lab setup scripts in order (00 → 06).
+# 00: roxctl · 01: Central · 02: Compliance · 03: verify RHACS · 04: apps · 05: RHACS API · 06: Perses monitoring.
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ warning() {
     echo -e "${YELLOW}[SETUP-MASTER] WARNING:${NC} $1"
 }
 
-# Numbered scripts (02–04 manage contexts internally where needed; 00–01 pre-switched to local-cluster)
+# Numbered scripts (02–04 manage contexts internally where needed; 00–01 and 06 pre-switched to local-cluster)
 SCRIPTS=(
     "00-install-roxctl.sh"
     "01-central-configuration.sh"
@@ -35,6 +35,7 @@ SCRIPTS=(
     "03-secured-cluster-aws-us.sh"
     "04-deploy-applications.sh"
     "05-configure-rhacs-settings.sh"
+    "06-setup-perses-monitoring.sh"
 )
 
 log "========================================================="
@@ -74,8 +75,8 @@ for idx in "${!SCRIPTS[@]}"; do
     log "Executing script $CURRENT/$TOTAL: $script"
     log "========================================================="
     
-    # 00–01 expect local-cluster; 02 switches contexts itself (local-cluster + aws-us)
-    if [[ "$script" =~ ^0[0-1]- ]]; then
+    # 00–01 and 06 expect local-cluster (06 uses default oc context for rhacs-operator / COO)
+    if [[ "$script" =~ ^0[0-1]-|^06- ]]; then
         log "Ensuring local-cluster context for script $script..."
         if oc config use-context local-cluster >/dev/null 2>&1; then
             log "✓ Switched to local-cluster context"

@@ -110,11 +110,10 @@ deploy_to_cluster() {
     return 0
 }
 
-# Start deploy in background; writes exit code to rcfile; job exit status matches deploy.
-# Command substitution $(run_deploy_bg ...) must capture ONLY the PID. The subshell inherits the
-# substitution pipe on stdout, so redirect job stdout to stderr — otherwise logs/oc apply pollute
-# the captured string and `wait` gets garbage (e.g. "not a pid or valid job spec").
-run_deploy_bg() {
+# Start a deploy in the background from the MAIN shell (never use $(...) here). Command substitution
+# runs a subshell that exits right after returning the PID; background children can then lose their
+# stable environment, and writes to "$STAGING/rc-*" may hit "No such file or directory".
+start_deploy_job() {
     local name="$1"
     local ctx="$2"
     local rcfile="$3"
@@ -123,10 +122,10 @@ run_deploy_bg() {
         export DEPLOY_LOG_PREFIX="[$name] "
         deploy_to_cluster "$name" "$ctx"
         ec=$?
-        echo "$ec" >"$rcfile"
+        printf '%s\n' "$ec" >"$rcfile"
         exit "$ec"
     ) &
-    printf '%s\n' $!
+    PIDS+=($!)
 }
 
 log ""
@@ -144,10 +143,10 @@ echo 1 >"$RC_AWS"
 
 PIDS=()
 
-PIDS+=("$(run_deploy_bg "local-cluster" "local-cluster" "$RC_LOCAL")")
+start_deploy_job "local-cluster" "local-cluster" "$RC_LOCAL"
 
 if context_exists aws-us; then
-    PIDS+=("$(run_deploy_bg "aws-us" "aws-us" "$RC_AWS")")
+    start_deploy_job "aws-us" "aws-us" "$RC_AWS"
 else
     log "No aws-us context — only deploying local-cluster"
     echo 0 >"$RC_AWS"
