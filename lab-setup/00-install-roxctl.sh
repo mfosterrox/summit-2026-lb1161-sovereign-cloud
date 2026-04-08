@@ -82,10 +82,18 @@ esac
 
 log "Using roxctl binary: $ROXCTL_ARCH"
 
-# Set roxctl version
-ROXCTL_VERSION="4.9.0"
+# Minimum acceptable roxctl (inclusive); newer releases stay installed — no downgrade.
+MIN_ROXCTL_VERSION="4.9.0"
+# Version to install when roxctl is missing or below MIN_ROXCTL_VERSION
+ROXCTL_VERSION="4.10.1"
 ROXCTL_URL="https://mirror.openshift.com/pub/rhacs/assets/${ROXCTL_VERSION}/bin/${ROXCTL_ARCH}/roxctl"
 ROXCTL_TMP="/tmp/roxctl"
+
+# True when $1 sorts after or equal to $2 (simple semver compare via sort -V)
+roxctl_version_ge() {
+    local have="$1" need="$2"
+    [ -n "$have" ] && [ -n "$need" ] && [ "$have" = "$(printf '%s\n' "$need" "$have" | sort -V | tail -1)" ]
+}
 
 # Check if roxctl is already installed
 if command -v roxctl >/dev/null 2>&1; then
@@ -99,12 +107,12 @@ if command -v roxctl >/dev/null 2>&1; then
         INSTALLED_VERSION=$(roxctl version --output json 2>/dev/null | grep -oE '"version":\s*"[^"]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
     fi
     
-    if [ -n "$INSTALLED_VERSION" ] && [[ "$INSTALLED_VERSION" == 4.9.* ]]; then
-        log "✓ roxctl version $INSTALLED_VERSION is already installed and up to date"
+    if roxctl_version_ge "$INSTALLED_VERSION" "$MIN_ROXCTL_VERSION"; then
+        log "✓ roxctl version $INSTALLED_VERSION is already installed (meets minimum $MIN_ROXCTL_VERSION)"
         log "roxctl CLI setup complete"
         exit 0
     else
-        log "roxctl exists but is not version 4.9 (found: ${INSTALLED_VERSION:-unknown})"
+        log "roxctl exists but is below minimum $MIN_ROXCTL_VERSION (found: ${INSTALLED_VERSION:-unknown})"
         log "Downloading version $ROXCTL_VERSION..."
     fi
 else

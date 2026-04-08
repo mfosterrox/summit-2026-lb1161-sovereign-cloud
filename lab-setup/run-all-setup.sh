@@ -1,16 +1,11 @@
 #!/bin/bash
-# Master script to execute lab setup scripts in order (00 → 02).
-# 00: roxctl CLI · 01: RHACS Central CR (local-cluster) · 02: Compliance Operator (each cluster).
+# Master script to execute lab setup scripts in order (00 → 03).
+# 00: roxctl · 01: Central (local-cluster) · 02: Compliance (checks local-cluster + aws-us) · 03: Secured Cluster on aws-us.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
-context_exists() {
-    local name="$1"
-    oc config get-contexts -o name 2>/dev/null | sed 's|^context/||' | grep -qx "$name"
-}
 
 # Colors
 RED='\033[0;31m'
@@ -32,11 +27,12 @@ warning() {
     echo -e "${YELLOW}[SETUP-MASTER] WARNING:${NC} $1"
 }
 
-# Primary phase: roxctl, Central config, Compliance on local-cluster
+# Numbered scripts (03 switches contexts internally; not forced to local-cluster before run)
 SCRIPTS=(
     "00-install-roxctl.sh"
     "01-central-configuration.sh"
     "02-compliance-operator-install.sh"
+    "03-secured-cluster-aws-us.sh"
 )
 
 log "========================================================="
@@ -76,8 +72,8 @@ for idx in "${!SCRIPTS[@]}"; do
     log "Executing script $CURRENT/$TOTAL: $script"
     log "========================================================="
     
-    # 00–02 expect local-cluster unless overridden (second pass sets TARGET_CLUSTER_CONTEXT for 02 only)
-    if [[ "$script" =~ ^0[0-2]- ]] && [ -z "${TARGET_CLUSTER_CONTEXT:-}" ]; then
+    # 00–01 expect local-cluster; 02 switches contexts itself (local-cluster + aws-us)
+    if [[ "$script" =~ ^0[0-1]- ]]; then
         log "Ensuring local-cluster context for script $script..."
         if oc config use-context local-cluster >/dev/null 2>&1; then
             log "✓ Switched to local-cluster context"
@@ -101,27 +97,6 @@ for idx in "${!SCRIPTS[@]}"; do
     log ""
 done
 
-# Compliance Operator on second cluster (aws-us) when that context exists
-if context_exists aws-us; then
-    log "========================================================="
-    log "Compliance Operator: aws-us cluster"
-    log "========================================================="
-    if oc config use-context aws-us >/dev/null 2>&1; then
-        log "✓ Switched to aws-us context"
-        TARGET_CLUSTER_CONTEXT=aws-us bash "$SCRIPT_DIR/02-compliance-operator-install.sh"
-        log "✓ Completed compliance operator setup for aws-us"
-    else
-        warning "Could not switch to aws-us; skipping second-cluster compliance install"
-    fi
-    if oc config use-context local-cluster >/dev/null 2>&1; then
-        log "✓ Switched back to local-cluster context"
-    fi
-    log ""
-else
-    log "No aws-us context in kubeconfig; skipping Compliance Operator install on second cluster"
-    log ""
-fi
-
 # Restore original context if it was set
 if [ -n "$ORIGINAL_CONTEXT" ]; then
     log "Restoring original context: $ORIGINAL_CONTEXT"
@@ -143,6 +118,8 @@ if [ ${#FAILED_SCRIPTS[@]} -eq 0 ]; then
     log "========================================================="
     log "RHACS Access Information"
     log "========================================================="
+
+    oc config use-context local-cluster >/dev/null 2>&1 || true
     
     # Detect RHACS namespace - check stackrox first (newer installations), then rhacs-operator (older installations)
     RHACS_NAMESPACE=""
