@@ -1,6 +1,12 @@
 #!/bin/bash
 # Run lab-setup, tssc-setup, and ai-setup in parallel with a live progress bar.
 # On failure, prints re-run commands and keeps logs under $LOG_DIR.
+#
+# Already parallel at this layer:
+#   [1] lab-setup/run-all-setup.sh   — numbered 00–06 run in order (RHACS ordering); 04 deploys
+#       local-cluster + aws-us in parallel via oc --context.
+#   [2] tssc-setup/setup.sh          — Keycloak → operator → deploy must stay sequential.
+#   [3] ai-setup/setup.sh            — operator + cluster checks run in parallel.
 
 set -uo pipefail
 
@@ -161,7 +167,7 @@ if [[ "$EC_AI" -ne 0 ]]; then
 fi
 
 echo -e "${YELLOW}After fixing the issue, you can re-run everything in parallel again:${NC}"
-echo "  cd $REPO_ROOT && bash run-parallel-setup.sh"
+echo "  cd $REPO_ROOT && bash setup.sh"
 echo ""
 
 exit 1

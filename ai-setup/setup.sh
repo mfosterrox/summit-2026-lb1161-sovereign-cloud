@@ -46,8 +46,21 @@ log "Red Hat OpenShift AI — verification"
 log "========================================================="
 log ""
 
-bash "$OPERATOR_SCRIPT"
-bash "$CLUSTER_SCRIPT"
+# Operator and DSC/dashboard checks only perform oc reads on local-cluster; run both in parallel.
+set +e
+bash "$OPERATOR_SCRIPT" &
+PID_OP=$!
+bash "$CLUSTER_SCRIPT" &
+PID_CL=$!
+wait "$PID_OP"
+EC_OP=$?
+wait "$PID_CL"
+EC_CL=$?
+set -e
+
+if [[ "$EC_OP" -ne 0 || "$EC_CL" -ne 0 ]]; then
+  error "One or more checks failed (operator exit $EC_OP, cluster exit $EC_CL). Re-run: bash $OPERATOR_SCRIPT / bash $CLUSTER_SCRIPT"
+fi
 
 log "========================================================="
 log "All checks passed"
