@@ -1,6 +1,6 @@
 #!/bin/bash
 # Master script to execute lab setup scripts in order (00 → 03).
-# 00: roxctl · 01: Central (local-cluster) · 02: Compliance (checks local-cluster + aws-us) · 03: Secured Cluster on aws-us.
+# 00: roxctl · 01: Central (local-cluster) · 02: Compliance (local + aws-us) · 03: verify RHACS Central + Secured Cluster (local + aws-us).
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ warning() {
     echo -e "${YELLOW}[SETUP-MASTER] WARNING:${NC} $1"
 }
 
-# Numbered scripts (03 switches contexts internally; not forced to local-cluster before run)
+# Numbered scripts (02–03 switch contexts as needed; not forced to local-cluster before 02/03)
 SCRIPTS=(
     "00-install-roxctl.sh"
     "01-central-configuration.sh"
