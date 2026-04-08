@@ -7,6 +7,10 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Keycloak / RHTAS target the hub cluster (same as lab / ai-setup). Parallel drivers may leave another context selected.
+KUBE_CONTEXT="${KUBE_CONTEXT:-local-cluster}"
+oc config use-context "$KUBE_CONTEXT" &>/dev/null || true
+
 # Step 1: Get Red Hat SSO (Keycloak) OIDC Issuer URL
 echo "Retrieving Red Hat SSO (Keycloak) OIDC Issuer URL..."
 
@@ -15,16 +19,12 @@ if [ -n "${KEYCLOAK_NAMESPACE:-}" ] && oc get namespace "$KEYCLOAK_NAMESPACE" >/
     KEYCLOAK_NS="$KEYCLOAK_NAMESPACE"
 elif oc get namespace rhsso >/dev/null 2>&1; then
     KEYCLOAK_NS="rhsso"
+elif oc get namespace keycloak >/dev/null 2>&1; then
+    # Red Hat build of Keycloak (rhbk-operator) — namespace is usually literally "keycloak"
+    KEYCLOAK_NS="keycloak"
 else
-    # Red Hat build of Keycloak (OLM): Subscription metadata.name is often rhbk-operator (namespace commonly "keycloak")
+    # OLM Subscription name rhbk-operator (metadata.name), any namespace
     KEYCLOAK_NS=$(oc get subscription.operators.coreos.com -A -o jsonpath='{range .items[?(@.metadata.name=="rhbk-operator")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1)
-    if [ -z "$KEYCLOAK_NS" ] && oc get namespace keycloak >/dev/null 2>&1; then
-        if oc get subscription.operators.coreos.com rhbk-operator -n keycloak >/dev/null 2>&1 \
-            || oc get statefulset keycloak -n keycloak >/dev/null 2>&1 \
-            || oc get deployment -n keycloak -l app.kubernetes.io/name=keycloak --no-headers 2>/dev/null | grep -q .; then
-            KEYCLOAK_NS="keycloak"
-        fi
-    fi
     if [ -z "$KEYCLOAK_NS" ]; then
         _routes_out=$(oc get routes -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
         while IFS= read -r line; do
