@@ -2,7 +2,7 @@
 
 # Master script to install and deploy Red Hat Trusted Artifact Signer (RHTAS)
 # This script orchestrates the installation of Keycloak, RHTAS Operator, and RHTAS components
-# Usage: ./setup.sh [--skip-keycloak] [--skip-operator] [--skip-deploy]
+# Usage: ./setup.sh [--skip-workstation-tools] [--skip-keycloak] [--skip-operator] [--skip-deploy]
 
 set -euo pipefail
 
@@ -37,12 +37,17 @@ info() {
 }
 
 # Parse command line arguments
+SKIP_WORKSTATION_TOOLS=false
 SKIP_KEYCLOAK=false
 SKIP_OPERATOR=false
 SKIP_DEPLOY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --skip-workstation-tools)
+            SKIP_WORKSTATION_TOOLS=true
+            shift
+            ;;
         --skip-keycloak)
             SKIP_KEYCLOAK=true
             shift
@@ -59,13 +64,15 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --skip-keycloak    Skip Keycloak installation"
-            echo "  --skip-operator    Skip RHTAS Operator installation"
-            echo "  --skip-deploy      Skip RHTAS component deployment"
-            echo "  --help, -h         Show this help message"
+            echo "  --skip-workstation-tools  Skip podman + cosign/gitsign on this host"
+            echo "  --skip-keycloak           Skip Keycloak installation"
+            echo "  --skip-operator           Skip RHTAS Operator installation"
+            echo "  --skip-deploy             Skip RHTAS component deployment"
+            echo "  --help, -h                Show this help message"
             echo ""
             echo "This script installs and deploys Red Hat Trusted Artifact Signer (RHTAS)"
             echo "in the following order:"
+            echo "  0. Workstation tools (podman, cosign, gitsign)"
             echo "  1. Keycloak (RHSSO) installation"
             echo "  2. RHTAS Operator installation"
             echo "  3. RHTAS component deployment"
@@ -92,10 +99,14 @@ fi
 log "✓ OpenShift CLI connected as: $(oc whoami)"
 
 # Check if scripts exist
+WORKSTATION_SCRIPT="${SCRIPT_DIR}/00-workstation-tools.sh"
 KEYCLOAK_SCRIPT="${SCRIPT_DIR}/01-keycloak.sh"
 OPERATOR_SCRIPT="${SCRIPT_DIR}/02-operator.sh"
 DEPLOY_SCRIPT="${SCRIPT_DIR}/03-deploy.sh"
 
+if [ ! -f "$WORKSTATION_SCRIPT" ]; then
+    error "Workstation tools script not found: $WORKSTATION_SCRIPT"
+fi
 if [ ! -f "$KEYCLOAK_SCRIPT" ]; then
     error "Keycloak script not found: $KEYCLOAK_SCRIPT"
 fi
@@ -108,6 +119,24 @@ fi
 
 log "✓ All required scripts found"
 log ""
+
+# Step 0: Bastion workstation tools (podman, cosign, gitsign)
+if [ "$SKIP_WORKSTATION_TOOLS" = false ]; then
+    log "========================================================="
+    log "Step 0: Workstation tools (podman, cosign, gitsign)"
+    log "========================================================="
+    log ""
+
+    if bash "$WORKSTATION_SCRIPT"; then
+        log "✓ Workstation tools completed successfully"
+    else
+        error "Workstation tools installation failed"
+    fi
+    log ""
+else
+    warning "Skipping workstation tools (--skip-workstation-tools)"
+    log ""
+fi
 
 # Step 1: Install Keycloak
 if [ "$SKIP_KEYCLOAK" = false ]; then
@@ -268,6 +297,8 @@ if [ "$SKIP_KEYCLOAK" = false ]; then
 fi
 
 log "To verify the installation:"
+log "  cosign version"
+log "  podman --version"
 log "  oc get pods -n ${KEYCLOAK_NAMESPACE:-rhsso}"
 log "  oc get pods -n trusted-artifact-signer"
 log "  oc get securesigns -n trusted-artifact-signer"

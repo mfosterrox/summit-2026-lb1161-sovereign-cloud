@@ -99,22 +99,12 @@ IMPORTANT: You will need to switch between contexts as needed throughout the lab
 
 We are going to deploy a bunch of insecure applications to the local cluster and ensure the lab is set up correctly.
 
-First, you will set up a few lab environment variables.
+The setup script configures required bastion environment variables (including RHACS client settings) before running the rest of the install.
 
 *Procedure*
 
 [start=1]
-. Add the RHACS environment variables (The "Bastion" tab in the right panel) to your ~/.bashrc file:
-+
-[source,sh,subs="attributes",role=execute]
-----
-cat >> ~/.bashrc << 'EOF'
-export GRPC_ENFORCE_ALPN_ENABLED=false
-EOF
-source ~/.bashrc
-----
-+
-. Next, clone the repository and run the parallel setup driver to configure your environment (lab automation, Trusted Artifact Signer, and OpenShift AI checks run at the same time with a progress bar).
+. Clone the repository and run the parallel setup driver to configure your environment (lab automation, Trusted Artifact Signer, and OpenShift AI checks run at the same time with a progress bar).
 +
 [IMPORTANT]
 ====
@@ -127,11 +117,6 @@ cd ~ && git clone https://github.com/mfosterrox/summit-2026-lb1161-sovereign-clo
 cd ~/svc-lab
 bash setup.sh
 ----
-+
-[IMPORTANT]
-====
-At the beginning of modules 2, 3, and 4 you will be asked to run `bash run-parallel-setup.sh` again (or the individual setup script for the area you are working in) to verify that everything is still healthy.
-====
 
 === OpenShift Console Access
 

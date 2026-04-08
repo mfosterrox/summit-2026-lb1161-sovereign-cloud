@@ -4,6 +4,19 @@
 
 set -uo pipefail
 
+# RHACS / roxctl: required for gRPC clients on some environments; persist for future shells.
+export GRPC_ENFORCE_ALPN_ENABLED=false
+if [[ -n "${HOME:-}" && -w "${HOME:-}" ]]; then
+  _bashrc="${HOME}/.bashrc"
+  if [[ -f "$_bashrc" ]] && ! grep -Fq 'GRPC_ENFORCE_ALPN_ENABLED' "$_bashrc" 2>/dev/null; then
+    {
+      echo ''
+      echo '# svc-lab (RHACS / roxctl)'
+      echo 'export GRPC_ENFORCE_ALPN_ENABLED=false'
+    } >>"$_bashrc" 2>/dev/null || true
+  fi
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT" || exit 1
 
