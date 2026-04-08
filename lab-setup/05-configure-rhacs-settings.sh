@@ -2,6 +2,7 @@
 # RHACS Configuration Script
 # Makes API calls to RHACS to change configuration details
 # Enables monitoring/metrics and configures policy guidelines
+# Authentication: ROX_API_TOKEN (from ~/.bashrc or environment; not generated here)
 
 # Exit immediately on error, show exact error message
 set -euo pipefail
@@ -68,98 +69,21 @@ fi
 ROX_ENDPOINT="$CENTRAL_ROUTE"
 log "✓ Extracted ROX_ENDPOINT: $ROX_ENDPOINT"
 
-# Get ADMIN_PASSWORD from secret (needed for token generation)
-log "Extracting admin password from secret..."
-
-# First check if secret exists
-if ! oc get secret central-htpasswd -n "$RHACS_NAMESPACE" >/dev/null 2>&1; then
-    log "Secret 'central-htpasswd' not found in namespace '$RHACS_NAMESPACE', checking environment variable..."
-    if [ -n "$ACS_PORTAL_PASSWORD" ]; then
-        ADMIN_PASSWORD_B64="$ACS_PORTAL_PASSWORD"
-        log "✓ Using password from ACS_PORTAL_PASSWORD environment variable"
-    else
-        error "Admin password secret 'central-htpasswd' not found in namespace '$RHACS_NAMESPACE' and ACS_PORTAL_PASSWORD environment variable not set"
-    fi
-else
-    # Secret exists, try to extract password
-    ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.password}' 2>/dev/null || echo "")
-    
-    # If password key not found, try alternative key names
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        ADMIN_PASSWORD_B64=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o jsonpath='{.data.adminPassword}' 2>/dev/null || echo "")
-    fi
-    
-    # If still not found, try to get all keys and use the first one
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        log "Checking available keys in secret..."
-        SECRET_DATA=$(oc get secret central-htpasswd -n "$RHACS_NAMESPACE" -o json 2>/dev/null || echo "")
-        if [ -n "$SECRET_DATA" ]; then
-            # Try to extract first key from data section
-            FIRST_KEY=$(echo "$SECRET_DATA" | jq -r '.data | keys[0]' 2>/dev/null || echo "")
-            if [ -n "$FIRST_KEY" ] && [ "$FIRST_KEY" != "null" ]; then
-                log "Found key '$FIRST_KEY' in secret, using it..."
-                ADMIN_PASSWORD_B64=$(echo "$SECRET_DATA" | jq -r ".data.$FIRST_KEY" 2>/dev/null || echo "")
-            fi
-        fi
-    fi
-    
-    # If still not found, fall back to environment variable
-    if [ -z "$ADMIN_PASSWORD_B64" ]; then
-        log "Could not extract password from secret, checking environment variable ACS_PORTAL_PASSWORD..."
-        if [ -n "$ACS_PORTAL_PASSWORD" ]; then
-            ADMIN_PASSWORD_B64="$ACS_PORTAL_PASSWORD"
-            log "✓ Using password from ACS_PORTAL_PASSWORD environment variable"
-        else
-            error "Could not extract password from secret 'central-htpasswd' in namespace '$RHACS_NAMESPACE' and ACS_PORTAL_PASSWORD environment variable not set"
-        fi
-    fi
+# ROX_API_TOKEN is provided by the lab environment (~/.bashrc). Non-interactive runners may not have sourced it.
+log "Using ROX_API_TOKEN from environment..."
+if [ -z "${ROX_API_TOKEN:-}" ] && [ -f "${HOME}/.bashrc" ]; then
+    set +u
+    # shellcheck disable=SC1090
+    source "${HOME}/.bashrc" 2>/dev/null || true
+    set -u
 fi
-
-# Decode password (ACS_PORTAL_PASSWORD is already base64 encoded)
-ADMIN_PASSWORD=$(echo "$ADMIN_PASSWORD_B64" | base64 -d 2>/dev/null || echo "")
-if [ -z "$ADMIN_PASSWORD" ]; then
-    error "Failed to decode admin password. The password might not be base64 encoded."
+if [ -z "${ROX_API_TOKEN:-}" ]; then
+    error "ROX_API_TOKEN is not set. Configure it in ~/.bashrc (export ROX_API_TOKEN=...) or export it before running this script."
 fi
-log "✓ Admin password extracted"
-
-# Generate ROX_API_TOKEN
-log "Generating API token..."
-ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT#https://}"
-ROX_ENDPOINT_FOR_API="${ROX_ENDPOINT_FOR_API#http://}"
-
-set +e
-TOKEN_RESPONSE=$(curl -k -s --connect-timeout 15 --max-time 60 -X POST \
-    -u "admin:${ADMIN_PASSWORD}" \
-    -H "Content-Type: application/json" \
-    "https://${ROX_ENDPOINT_FOR_API}/v1/apitokens/generate" \
-    -d '{"name":"rhacs-config-script-token","roles":["Admin"]}' 2>&1)
-TOKEN_CURL_EXIT_CODE=$?
-set -e
-
-if [ $TOKEN_CURL_EXIT_CODE -ne 0 ]; then
-    error "Failed to generate API token. curl exit code: $TOKEN_CURL_EXIT_CODE. Response: ${TOKEN_RESPONSE:0:300}"
-fi
-
-# Extract token from response
-if echo "$TOKEN_RESPONSE" | jq . >/dev/null 2>&1; then
-    ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // .data.token // empty' 2>/dev/null || echo "")
-fi
-
-if [ -z "$ROX_API_TOKEN" ] || [ "$ROX_API_TOKEN" = "null" ]; then
-    # Try to extract token from response text
-    ROX_API_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oE '[a-zA-Z0-9_-]{40,}' | head -1 || echo "")
-fi
-
-if [ -z "$ROX_API_TOKEN" ]; then
-    error "Failed to extract API token from response. Response: ${TOKEN_RESPONSE:0:500}"
-fi
-
-# Verify token is not empty and has reasonable length
 if [ ${#ROX_API_TOKEN} -lt 20 ]; then
-    error "Generated token appears to be invalid (too short: ${#ROX_API_TOKEN} chars)"
+    error "ROX_API_TOKEN appears invalid (too short: ${#ROX_API_TOKEN} chars)"
 fi
-
-log "✓ API token generated (length: ${#ROX_API_TOKEN} chars)"
+log "✓ ROX_API_TOKEN loaded (length: ${#ROX_API_TOKEN} chars)"
 
 # Ensure jq is installed
 if ! command -v jq >/dev/null 2>&1; then

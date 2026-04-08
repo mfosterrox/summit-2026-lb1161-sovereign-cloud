@@ -110,19 +110,23 @@ deploy_to_cluster() {
     return 0
 }
 
-# Start deploy in background; writes exit code to rcfile; job exit status matches deploy
+# Start deploy in background; writes exit code to rcfile; job exit status matches deploy.
+# Command substitution $(run_deploy_bg ...) must capture ONLY the PID. The subshell inherits the
+# substitution pipe on stdout, so redirect job stdout to stderr — otherwise logs/oc apply pollute
+# the captured string and `wait` gets garbage (e.g. "not a pid or valid job spec").
 run_deploy_bg() {
     local name="$1"
     local ctx="$2"
     local rcfile="$3"
     (
+        exec 1>&2
         export DEPLOY_LOG_PREFIX="[$name] "
         deploy_to_cluster "$name" "$ctx"
         ec=$?
         echo "$ec" >"$rcfile"
         exit "$ec"
     ) &
-    echo $!
+    printf '%s\n' $!
 }
 
 log ""
