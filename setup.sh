@@ -3,9 +3,9 @@
 # On failure, prints re-run commands and keeps logs under $LOG_DIR.
 #
 # Already parallel at this layer:
-#   [1] lab-setup/run-all-setup.sh   — numbered 00–06 run in order (RHACS ordering); 04 deploys
-#       local-cluster + aws-us in parallel via oc --context.
-#   [2] tssc-setup/setup.sh          — Keycloak → operator → deploy must stay sequential.
+#   [1] lab-setup/run-all-setup.sh   — 01–07 in order, then workstation tools (cosign/gitsign need RHTAS route);
+#       05 deploys local-cluster + aws-us in parallel via oc --context.
+#   [2] tssc-setup/setup.sh          — Keycloak → operator → deploy (--skip-workstation-tools: tools installed in [1]).
 #   [3] ai-setup/setup.sh            — operator + cluster checks run in parallel.
 
 set -uo pipefail
@@ -70,7 +70,7 @@ echo ""
 
 bash "$LAB_SCRIPT" >"$LOG_DIR/lab.log" 2>&1 &
 PID_LAB=$!
-bash "$TSSC_SCRIPT" >"$LOG_DIR/tssc.log" 2>&1 &
+bash "$TSSC_SCRIPT" --skip-workstation-tools >"$LOG_DIR/tssc.log" 2>&1 &
 PID_TSSC=$!
 bash "$AI_SCRIPT" >"$LOG_DIR/ai.log" 2>&1 &
 PID_AI=$!
